@@ -1,0 +1,39 @@
+clients:
+  - name: bastion
+    groups:
+      - bastion-users
+
+  - name: gitlab
+    groups:
+      - gitlab-users
+
+  - name: jenkins
+    groups:
+      - jenkins-users
+      - jenkins-admins
+
+  - name: nexus
+    groups:
+      - nexus-users
+      - nexus-admins
+
+  - name: sonar
+    groups:
+      - sonar-users
+      - sonar-admins
+      - sonar-creators
+
+  - name: vault
+    groups:
+      - vault-solution-architects
+      - vault-k8s-admins
+      - vault-ldap-admins
+      - vault-database-admins
+
+hbac_access_rule:
+  - name: bastion
+
+service_accounts:
+  - name: ldap
+  - name: jenkins
+  - name: gitlab

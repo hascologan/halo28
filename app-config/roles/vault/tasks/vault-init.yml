@@ -1,0 +1,44 @@
+- name: Check if vault keys exist
+  stat:
+    path: ../passwords/vault_keys.json
+  delegate_to: localhost
+  register: local_keys
+
+- block:
+    - name: Initialize Vault
+      command:
+        argv:
+          - vault
+          - operator
+          - init
+          - -address=https://{{ ansible_host }}:8200
+      register: vault_init
+      ignore_errors: yes
+
+    - name: Add recovery keys
+      set_fact:
+        vault_key:
+          '{{ vault_key | default([]) | combine ({ "recovery_key_" ~ i : item })
+          }}'
+      loop: '{{ vault_init.stdout | regex_findall("Recovery Key \d: (.*)") }}'
+      loop_control:
+        index_var: i
+
+    - name: Add root token
+      set_fact:
+        vault_key:
+          '{{ vault_key | default([]) | combine ({ "root_token" : item }) }}'
+      loop:
+        '{{ vault_init.stdout | regex_findall("Initial Root Token: (.*)") }}'
+
+    - copy:
+        dest: ../passwords/vault_keys.json
+        content: "{{ vault_key | to_nice_json }}"
+      delegate_to: localhost
+
+  when: local_keys.stat.islnk is not defined
+
+- include_vars:
+    file: ../passwords/vault_keys.json
+    name: vault_token
+  delegate_to: localhost

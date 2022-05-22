@@ -1,0 +1,32 @@
+---
+- name: Install required packages
+  dnf:
+    name:
+      - java-11-openjdk
+      - podman
+      - git
+    state: latest
+  become: yes
+
+- name: Enable user home directories
+  command:
+    argv:
+      - authconfig
+      - --enablemkhomedir
+      - --update
+  become: yes
+
+- name: Set the search registry
+  replace:
+    path: /etc/containers/registries.conf
+    regexp: '^\[registries.search\]\nregistries\s=\s\[.*\]'
+    replace: "[registries.search]\nregistries = ['docker.io']"
+  become: yes
+
+- name: Set the search insecure registries
+  replace:
+    path: /etc/containers/registries.conf
+    regexp: '^\[registries.insecure\]\nregistries\s=\s\[.*\]'
+    replace:
+      "[registries.insecure]\nregistries = ['nexus.{{ ansible_facts.domain }}']"
+  become: yes

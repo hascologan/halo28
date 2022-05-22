@@ -1,0 +1,218 @@
+---
+###############################################################################
+# Adding as nginx is not in patch server
+- name: Adding nginx repo to dnf.conf
+  blockinfile:
+    path: /etc/dnf/dnf.conf
+    block: |
+      [nginx-stable]
+      name=nginx stable repo
+      baseurl=http://nginx.org/packages/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=1
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+
+      [nginx-mainline]
+      name=nginx mainline repo
+      baseurl=http://nginx.org/packages/mainline/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=0
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Adding nginx repo to yum.repos.d
+  blockinfile:
+    path: /etc/yum.repos.d/nginx.repo
+    create: yes
+    block: |
+      [nginx-stable]
+      name=nginx stable repo
+      baseurl=http://nginx.org/packages/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=1
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+
+      [nginx-mainline]
+      name=nginx mainline repo
+      baseurl=http://nginx.org/packages/mainline/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=0
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+###############################################################################
+
+- name: Install required packages via dnf
+  dnf:
+    name:
+      - java-11-openjdk
+      - git
+      - unzip
+      - nginx
+    state: latest
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Install required packages via yum
+  yum:
+    name:
+      - java-11-openjdk
+      - git
+      - unzip
+      - nginx
+    state: latest
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+
+- name: Create sonarqube user
+  user:
+    name: sonarqube
+  become: yes
+
+- name: Create and add file
+  lineinfile:
+    path: /etc/sysctl.d/90-sonarqube.conf
+    line: "{{ item }}"
+    create: yes
+  with_items:
+    - vm.max_map_count=262144
+    - fs.file-max=65536
+  become: yes
+
+- name: Download SonarQube
+  unarchive:
+    src:
+      "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{
+      sonarqube_version }}.zip"
+    dest: /opt
+    remote_src: yes
+    owner: sonarqube
+    group: sonarqube
+  become: yes
+
+- name: Template service file
+  template:
+    src: sonarqube.j2
+    dest: /etc/systemd/system/sonarqube.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: yes
+
+- name: Daemon reload
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+- name: Enable SonarQube systemd
+  systemd:
+    name: sonarqube
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Disable SELinux
+  command:
+    argv:
+      - setenforce
+      - "0"
+  become: yes
+
+- name: Disable SELinux on reboot
+  selinux:
+    state: disabled
+  become: yes
+
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Update facts
+  setup:
+
+- name: Create directory for nginx TLS certs
+  file:
+    path: /etc/pki/nginx/
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: Check to see if TLS cert is present
+  stat:
+    path: /etc/pki/nginx/{{ ansible_facts.fqdn }}.crt
+  register: cert
+
+- name: Create TLS self signed certs
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -nodes
+      - -new
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.crt"
+      - -subj
+      - "/C=US/ST=AZ/L=Gilbert/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: cert.stat.exists == false
+
+- name: Check to see if TLS CSR is present
+  stat:
+    path: /etc/pki/nginx/{{ ansible_facts.fqdn }}.csr
+  register: csr
+
+- name: Create TLS CSR
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.csr"
+      - -subj
+      - "/C=US/ST=AZ/L=Gilbert/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: csr.stat.exists == false
+
+- name: Template the nginx configuration file
+  template:
+    src: nginx.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: yes
+
+- name: Enable nginx systemd
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes
+  become: yes

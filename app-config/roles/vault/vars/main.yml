@@ -1,0 +1,10 @@
+admin_users:
+  - name: service-ldap
+  - name: service-gitlab
+  - name: nexus-admin
+  - name: sonarqube-admin
+  - name: sonarqube-db-user
+
+system:
+  - name: openvpn
+  - name: gitlab

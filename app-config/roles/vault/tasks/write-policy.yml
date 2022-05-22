@@ -1,0 +1,20 @@
+- name: Write policy to Vault
+  command:
+  args:
+    stdin: '{{ lookup("file", "policies/" ~ item.path) }}'
+    argv:
+      - vault
+      - policy
+      - write
+      - -address=https://{{ ansible_host }}:8200
+      - '{{ item.path.replace(".hcl", "") }}'
+      - "-"
+
+- name: Associate policy to LDAP
+  command:
+    argv:
+      - vault
+      - write
+      - -address=https://{{ ansible_host }}:8200
+      - auth/ldap/groups/{{ item.path.replace(".hcl", "") }}
+      - policies={{ item.path.replace(".hcl", "") }}

@@ -1,0 +1,25 @@
+---
+- name: Wait for target connection to become reachable/usable
+  wait_for_connection:
+
+- name: Gather facts
+  setup:
+
+- name: Check if IdM client is configured
+  command:
+    argv:
+      - ipa
+      - "-n"
+  ignore_errors: True
+  register: ipa_check
+  changed_when: "'did not receive Kerberos credentials' in ipa_check.stderr"
+  failed_when: ipa_check.rc == 0
+
+- name: Uninstall IdM client
+  command:
+    argv:
+      - ipa-client-install
+      - --uninstall
+      - --unattended
+  become: yes
+  when: ipa_check is changed

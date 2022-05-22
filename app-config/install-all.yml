@@ -1,0 +1,33 @@
+---
+- name: Wait for connection
+  import_playbook: wait_for_connection.yml
+
+- name: Update all servers
+  import_playbook: update-all.yml
+
+- name: Install ipa server
+  import_playbook: install-ipa-server.yml
+
+- name: Install ipa client
+  import_playbook: install-ipa-client.yml
+
+- name: Post-IPA Kinit Configuration
+  import_playbook: install-kinit.yml
+
+- name: Install OpenSCAP client
+  import_playbook: install-openscap.yml
+
+- name: Install gitlab-omnibus
+  import_playbook: install-gitlab-omnibus.yml
+
+- name: Install SonarQube
+  import_playbook: install-sonarqube.yml
+
+- name: Install Nexus
+  import_playbook: install-nexus.yml
+
+- name: Install kubectl
+  import_playbook: install-kubectl.yml
+
+- name: Install vault
+  import_playbook: install-vault.yml

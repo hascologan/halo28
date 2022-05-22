@@ -1,0 +1,75 @@
+---
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Add IdM IP address to hosts file
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ ansible_facts.default_ipv4.address }} {{ ansible_host }}"
+    state: present
+  become: yes
+
+- name: Install a modularity IdM with defined stream and profile
+  dnf:
+    name: "@idm:DL1/server"
+    state: present
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Install IdM server via yum
+  yum:
+    name: ipa-server
+    state: present
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+
+- name: Update facts
+  setup:
+
+- name: Check if IdM client is configured
+  command:
+    argv:
+      - ipa
+      - "-n"
+  ignore_errors: True
+  register: ipa_check
+  changed_when: "'IPA client is not configured' in ipa_check.stderr"
+  failed_when: ipa_check.rc == 0
+
+- name: Run Non-Interactive IdM Install Script
+  command:
+    argv:
+      - ipa-server-install
+      - "--realm={{ ansible_facts.domain | upper }}"
+      - "--domain={{ ansible_facts.domain }}"
+      - "--ca-subject=CN={{ project_name }},O={{ ansible_facts.domain | upper }}"
+      - "--ds-password={{ ds_pwd }}"
+      - "--admin-password={{ admin_pwd }}"
+      - --unattended
+  become: yes
+  when: ipa_check is changed
+
+- name: Disabling the kerberos popup for Chrome
+  blockinfile:
+    path: /etc/httpd/conf.d/ipa-rewrite.conf
+    block: |
+      # Disables the kerberos popup for Chrome
+      RewriteCond %{HTTP_COOKIE} !ipa_session
+      RewriteCond %{HTTP_REFERER} ^(.+)/ipa/ui/$
+      RewriteRule ^/ipa/session/json$ - [R=401,L]
+      RedirectMatch 401 ^/ipa/session/login_kerberos
+  become: yes
+
+- name: Restart IPA for kerberos popup for Chrome Fix
+  systemd:
+    name: ipa
+    state: restarted
+  become: yes

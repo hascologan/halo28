@@ -1,0 +1,32 @@
+- name: Create HBAC Rule for {{ client.name }} Access
+  command:
+    argv:
+      - ipa
+      - hbacrule-add
+      - "{{ client.name }}-access"
+      - --desc=Allow users access to the {{ client.name }} host
+
+- name: Add Usergroup to HBAC Rule for {{ client.name }} Access
+  command:
+    argv:
+      - ipa
+      - hbacrule-add-user
+      - "{{ client.name }}-access"
+      - --groups={{ client.name }}-users
+
+- name: Add Host to HBAC Rule for {{ client.name }} Access
+  command:
+    argv:
+      - ipa
+      - hbacrule-add-host
+      - "{{ client.name }}-access"
+      - --hosts={{ client.name }}.{{ ansible_domain }}
+
+- name: Add Service to HBAC Rule for {{ client.name }} Access
+  command:
+    argv:
+      - ipa
+      - hbacrule-add-service
+      - "{{ client.name }}-access"
+      - --hbacsvcs=sudo
+      - --hbacsvcs=sshd

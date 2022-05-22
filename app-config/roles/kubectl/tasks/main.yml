@@ -1,0 +1,32 @@
+---
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Download kubectl
+  get_url:
+    url: "https://dl.k8s.io/release/v{{ k8s_version }}/bin/linux/amd64/kubectl"
+    dest: /usr/local/bin/kubectl
+    owner: root
+    group: root
+    mode: "0755"
+  become: yes
+
+- name: Download and extract helm
+  unarchive:
+    src: "https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    dest: /usr/local/bin
+    owner: root
+    group: root
+    remote_src: yes
+    extra_opts: [linux-amd64/helm, --strip-components=1]
+  become: yes
+
+- name: Enable user home directories
+  command:
+    argv:
+      - authconfig
+      - --enablemkhomedir
+      - --update
+  become: yes

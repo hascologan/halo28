@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure Nexus server
+  hosts: nexus
+  roles:
+    - nexus

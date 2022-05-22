@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure openscap server
+  hosts: openscap
+  roles:
+    - openscap

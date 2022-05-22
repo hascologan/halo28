@@ -1,0 +1,7 @@
+---
+- name: Playbook to configure IPA client
+  hosts: ipaclient
+  gather_facts: no
+
+  roles:
+    - uninstallipaclient

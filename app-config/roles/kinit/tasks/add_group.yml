@@ -1,0 +1,7 @@
+- name: Create '{{ item.1 }}' Group
+  command:
+    argv:
+      - ipa
+      - group-add
+      - "{{ item.1 }}"
+  when: "'Group name: ' ~ item.1 not in group_list.stdout"

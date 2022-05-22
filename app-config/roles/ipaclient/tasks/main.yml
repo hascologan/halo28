@@ -1,0 +1,59 @@
+---
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Add IdM IP address to hosts file
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ ansible_facts.default_ipv4.address }} {{ ansible_host }}"
+    state: present
+  become: yes
+
+- name: Install a modularity IdM with defined stream and profile
+  dnf:
+    name: "@idm:DL1/client"
+    state: present
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Install IdM Client via yum
+  yum:
+    name: ipa-client
+    state: present
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+
+- name: Update facts
+  setup:
+
+- name: Check if IdM client is configured
+  command:
+    argv:
+      - ipa
+      - "-n"
+  ignore_errors: True
+  register: ipa_check
+  changed_when: "'IPA client is not configured' in ipa_check.stderr"
+  failed_when: ipa_check.rc == 0
+
+- name: Run Non-Interactive IdM client install script
+  command:
+    argv:
+      - ipa-client-install
+      - "--server=ipa.{{ ansible_facts.domain }}"
+      - "--domain={{ ansible_facts.domain }}"
+      - "--realm={{ ansible_facts.domain | upper }}"
+      - --principal=admin
+      - "--password={{ admin_pwd }}"
+      - --unattended
+      - --force-join
+  become: yes
+  when: ipa_check is changed

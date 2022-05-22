@@ -1,0 +1,7 @@
+---
+- name: Playbook to wait for connection
+  hosts: show_facts
+
+  tasks:
+    - debug:
+        msg: "{{ ansible_facts }}"

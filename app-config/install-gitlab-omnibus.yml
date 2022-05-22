@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure GitLab Omnibus server
+  hosts: gitlab
+  roles:
+    - gitlab-omnibus

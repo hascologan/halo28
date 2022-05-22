@@ -1,0 +1,16 @@
+ui = true
+
+storage "file" {
+  path = "/opt/vault/data"
+}
+
+listener "tcp" {
+  address     = "{{ ansible_host }}:8200"
+  tls_cert_file = "/etc/pki/vault/{{ ansible_host }}.crt"
+  tls_key_file  = "/etc/pki/vault/{{ ansible_host }}.key"
+}
+
+seal "awskms" {
+  region = "{{ aws_region }}"
+  kms_key_id = "{{ vault_key_id }}"
+}

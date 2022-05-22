@@ -1,0 +1,13 @@
+---
+- name: Automated certificate signing process
+  hosts: vault
+  roles:
+    - cert
+  vars:
+    cert_path: /etc/pki/vault/
+    requesting_host: vault
+
+- name: Playbook to install vault
+  hosts: vault
+  roles:
+    - vault

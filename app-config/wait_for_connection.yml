@@ -1,0 +1,6 @@
+---
+- name: Playbook to wait for connection
+  hosts: all
+  gather_facts: no
+  roles:
+    - wait_for_connection

@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure Jenkins server
+  hosts: jenkins
+  roles:
+    - jenkins

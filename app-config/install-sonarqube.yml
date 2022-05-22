@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure SonarQube server
+  hosts: sonarqube
+  roles:
+    - sonarqube

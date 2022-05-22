@@ -1,0 +1,18 @@
+---
+- name: Playbook to wait for connection
+  hosts: all
+
+  tasks:
+    - name: Find log4j on server
+      find:
+        paths: /
+        use_regex: yes
+        patterns: "^log4j-core-*.jar$"
+        recurse: yes
+      register: log4j_output
+
+    - name: Scan Results
+      debug:
+        msg:
+          "Examined {{ log4j_output.examined }} and found {{
+          log4j_output.matched }} files"

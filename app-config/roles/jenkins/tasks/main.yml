@@ -1,0 +1,131 @@
+---
+- name: Install required packages
+  dnf:
+    name:
+      - java-11-openjdk
+      - git
+      - nginx
+    state: latest
+  become: yes
+
+- name: Adding LTS Jenkins repo to dnf.conf
+  blockinfile:
+    path: /etc/dnf/dnf.conf
+    block: |
+      [jenkins]
+      name=Jenkins-stable
+      baseurl=http://pkg.jenkins.io/redhat-stable
+      gpgcheck=1
+  become: yes
+
+- name: Get Jenkins repo key
+  become: yes
+  rpm_key:
+    state: present
+    key: https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+
+- name: Install Jenkins
+  dnf:
+    name: jenkins
+    state: latest
+  become: yes
+
+- name: Disable SELinux
+  command:
+    argv:
+      - setenforce
+      - "0"
+  become: yes
+
+- name: Disable SELinux on reboot
+  selinux:
+    state: disabled
+  become: yes
+
+- name: Configure Jenkins config file
+  lineinfile:
+    path: /etc/sysconfig/jenkins
+    regexp: "^JENKINS_LISTEN_ADDRESS"
+    line: 'JENKINS_LISTEN_ADDRESS="127.0.0.1"'
+  become: yes
+
+- name: Daemon reload
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+- name: Enable Jenkins systemd
+  systemd:
+    name: jenkins
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Create directory for nginx TLS certs
+  file:
+    path: /etc/pki/nginx/
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: Check to see if TLS cert is present
+  stat:
+    path: /etc/pki/nginx/{{ ansible_facts.fqdn }}.crt
+  register: cert
+
+- name: Create TLS self signed certs
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -nodes
+      - -new
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.crt"
+      - -subj
+      - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: cert.stat.exists == false
+
+- name: Check to see if TLS CSR is present
+  stat:
+    path: /etc/pki/nginx/{{ ansible_facts.fqdn }}.csr
+  register: csr
+
+- name: Create TLS CSR
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.csr"
+      - -subj
+      - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: csr.stat.exists == false
+
+- name: Template the nginx configuration file
+  template:
+    src: nginx.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: yes
+
+- name: Enable nginx systemd
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes
+  become: yes

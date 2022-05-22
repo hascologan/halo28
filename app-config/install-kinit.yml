@@ -1,0 +1,10 @@
+---
+- name: Playbook to configure Kinit
+  hosts: ipaserver
+  vars:
+    expire_year: "{{ ansible_date_time.year | int + 1 }}"
+    password_expiration_date:
+      '{{ expire_year + ansible_date_time.month + ansible_date_time.day +
+      "000000Z" }}'
+  roles:
+    - kinit

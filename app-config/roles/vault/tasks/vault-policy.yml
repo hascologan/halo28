@@ -1,0 +1,22 @@
+- name: Log into vault
+  command:
+    argv:
+      - vault
+      - login
+      - -address=https://{{ ansible_host }}:8200
+      - token={{ vault_token.root_token }}
+  register: login_info
+
+- name: Get list of existing auth methods
+  command:
+    argv:
+      - vault
+      - policy
+      - list
+      - -address=https://{{ ansible_host }}:8200
+  register: policy_list
+
+- name: Write Vault policy for each file in vault
+  include_tasks: write-policy.yml
+  with_filetree: policies/
+  when: item.path.replace('.hcl', '') not in policy_list.stdout

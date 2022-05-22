@@ -1,0 +1,58 @@
+---
+- name: Install OpenScap packages
+  dnf:
+    name:
+      - scap-security-guide
+      - openscap-utils
+      - openscap-scanner
+      - nginx
+    state: latest
+  become: yes
+
+- name: Create directory for nginx TLS certs
+  file:
+    path: /etc/pki/nginx/
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: Check to see if TLS cert is present
+  stat:
+    path: /etc/pki/nginx/server.crt
+  register: cert
+
+- name: Create TLS self signed certs
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -nodes
+      - -new
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - server.key
+      - -out
+      - server.crt
+      - -subj
+      - "/C=US/ST=AZ/L=Gilbert/O=Software Factory/CN={{ ansible_host }}"
+  become: yes
+  when: cert.stat.exists == false
+
+- name: Template the nginx configuration file
+  template:
+    src: nginx.conf
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: yes
+
+- name: Enable nginx systemd
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes
+  become: yes

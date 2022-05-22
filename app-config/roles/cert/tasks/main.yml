@@ -1,0 +1,133 @@
+- name: Check if there exists a cert
+  stat:
+    path: "{{ cert_path }}/{{ ansible_facts.fqdn }}.crt"
+  register: current_crt
+
+- block:
+    - name: Check if the existing cert is signed with IPA in the correct domain
+      command:
+        chdir: "{{ cert_path }}"
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ ansible_facts.fqdn }}.crt"
+          - -text
+      register: cert_info
+
+    - name: Set fact to skip running cert related steps if cert_info is valid
+      set_fact:
+        run_cert: false
+      when: "'ipa-ca.' ~ ansible_facts.domain in cert_info.stdout"
+
+  when: current_crt.stat.islnk is defined
+
+- name: Set fact to run cert related steps if crt file does not exist
+  set_fact:
+    run_cert: true
+  when: current_crt.stat.islnk is not defined
+
+- block:
+    - name: Create directory for TLS certs
+      file:
+        path: "{{ cert_path }}"
+        state: directory
+        mode: "0755"
+      become: yes
+
+    - name: Check to see if TLS CSR is present
+      stat:
+        path: "{{ cert_path }}/{{ ansible_facts.fqdn }}.csr"
+      register: csr_check
+
+    - name: Create TLS self signed certs
+      command:
+        chdir: "{{ cert_path }}"
+        argv:
+          - openssl
+          - req
+          - -nodes
+          - -newkey
+          - rsa:2048
+          - -keyout
+          - "{{ ansible_facts.fqdn }}.key"
+          - -out
+          - "{{ ansible_facts.fqdn }}.csr"
+          - -subj
+          - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn
+            }}"
+      become: yes
+      when: csr_check.stat.exists == false
+
+    - name: Save CSR in register
+      slurp:
+        src: "{{ cert_path }}/{{ ansible_facts.fqdn }}.csr"
+      register: csr
+  when: run_cert
+
+- block:
+    - name: Get Token
+      command: kinit admin
+      args:
+        stdin: "{{ admin_pwd }}"
+
+    - name: Check Token
+      command: klist
+      register: result
+      failed_when: "'krbtgt' not in result.stdout"
+
+    - name: Print csr to a file
+      copy:
+        content: "{{ csr.content | b64decode }}"
+        dest: "{{ requesting_host }}.csr"
+
+    - name: Get host information
+      command:
+        argv:
+          - ipa
+          - host-show
+          - "{{ requesting_host }}"
+      register: host_info
+
+    - name: Sign CSR
+      command:
+        argv:
+          - ipa
+          - cert-request
+          - "{{ requesting_host }}.csr"
+          - --principal={{ host_info.stdout | regex_search("host/.*") }}
+          - --certificate-out={{ requesting_host }}.crt
+
+    - name: Save file to register
+      slurp:
+        src: "{{ requesting_host }}.crt"
+      register: crt
+
+    - name: Remove crt file
+      file:
+        path: "{{ requesting_host }}.crt"
+        state: absent
+
+    - name: Remove csr file
+      file:
+        path: "{{ requesting_host }}.csr"
+        state: absent
+
+    - name: Destroy Token
+      command: kdestroy
+
+    - name: Check Token
+      command: klist
+      register: result
+      failed_when: "'krbtgt' in result.stdout"
+      changed_when: result.rc != 1
+
+  delegate_to: '{{ groups["ipaserver"][0] }}'
+  when: run_cert
+
+- name: Print pem to file
+  copy:
+    content: "{{ crt.content | b64decode }}"
+    dest: "{{ cert_path }}/{{ ansible_facts.fqdn }}.crt"
+  become: yes
+  when: run_cert

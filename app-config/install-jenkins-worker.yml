@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure Jenkins worker
+  hosts: jenkins_worker
+  roles:
+    - jenkins-worker

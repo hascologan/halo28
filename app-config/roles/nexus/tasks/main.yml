@@ -1,0 +1,233 @@
+---
+###############################################################################
+# Adding as nginx is not in patch server
+- name: Adding nginx repo to dnf.conf
+  blockinfile:
+    path: /etc/dnf/dnf.conf
+    block: |
+      [nginx-stable]
+      name=nginx stable repo
+      baseurl=http://nginx.org/packages/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=1
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+
+      [nginx-mainline]
+      name=nginx mainline repo
+      baseurl=http://nginx.org/packages/mainline/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=0
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Adding nginx repo to yum.repos.d
+  blockinfile:
+    path: /etc/yum.repos.d/nginx.repo
+    create: yes
+    block: |
+      [nginx-stable]
+      name=nginx stable repo
+      baseurl=http://nginx.org/packages/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=1
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+
+      [nginx-mainline]
+      name=nginx mainline repo
+      baseurl=http://nginx.org/packages/mainline/centos/$releasever/$basearch/
+      gpgcheck=1
+      enabled=0
+      gpgkey=https://nginx.org/keys/nginx_signing.key
+      module_hotfixes=true
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+###############################################################################
+
+- name: Install required packages via dnf
+  dnf:
+    name:
+      - java-1.8.0-openjdk
+      - nginx
+    state: latest
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Install required packages via yum
+  yum:
+    name:
+      - java-1.8.0-openjdk
+      - nginx
+    state: latest
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+
+- name: Create nexus user
+  user:
+    name: nexus
+  become: yes
+
+- name: Download software
+  unarchive:
+    src: https://download.sonatype.com/nexus/3/latest-unix.tar.gz
+    dest: /opt
+    remote_src: yes
+    owner: nexus
+    group: nexus
+  become: yes
+
+- name: Check to see if nexus is installed already
+  stat:
+    path: /opt/nexus
+  register: nexus
+
+- name: Remove the current version of nexus
+  file:
+    path: /opt/nexus
+    state: absent
+  when: nexus.stat.isdir is defined and nexus.stat.isdir
+  become: yes
+
+- name: Find nexus-* dir
+  find:
+    paths: /opt
+    recurse: no
+    file_type: directory
+    patterns: "nexus-*"
+  register: find_output
+
+- name: Move the Nexus folder
+  command: "mv --force {{ find_output.files[0].path }} /opt/nexus"
+  become: yes
+
+- name: Change owner of directory
+  file:
+    path: "{{ item  }}"
+    mode: "0755"
+    owner: nexus
+    group: nexus
+    recurse: yes
+  loop:
+    - "/opt/nexus"
+    - "/opt/sonatype-work"
+  become: yes
+
+- name: Copy service file
+  copy:
+    src: nexus.service
+    dest: /etc/systemd/system/
+    owner: root
+    group: root
+    mode: "0600"
+  become: yes
+
+- name: enable nexus service
+  systemd:
+    name: nexus
+    enabled: yes
+    state: started
+  become: yes
+
+- name: Disable SELinux
+  command:
+    argv:
+      - setenforce
+      - "0"
+  become: yes
+
+- name: Disable SELinux on reboot
+  selinux:
+    state: disabled
+  become: yes
+
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Update facts
+  setup:
+
+- name: Create directory for nginx TLS certs
+  file:
+    path: /etc/pki/nginx/
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: Check to see if TLS cert is present
+  stat:
+    path: /etc/pki/nginx/{{ ansible_facts.fqdn }}.crt
+  register: cert
+
+- name: Create TLS self signed certs
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -nodes
+      - -new
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.crt"
+      - -subj
+      - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: cert.stat.exists == false
+
+- name: Check to see if TLS CSR is present
+  stat:
+    path: /etc/pki/nginx/{{ ansible_facts.fqdn }}.csr
+  register: csr
+
+- name: Create TLS CSR
+  command:
+    chdir: /etc/pki/nginx/
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.csr"
+      - -subj
+      - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: csr.stat.exists == false
+
+- name: Template the nginx configuration file
+  template:
+    src: nginx.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: yes
+
+- name: Enable nginx systemd
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes
+  become: yes

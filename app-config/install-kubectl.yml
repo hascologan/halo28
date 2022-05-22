@@ -1,0 +1,5 @@
+---
+- name: Playbook to configure kubectl server
+  hosts: kubectl
+  roles:
+    - kubectl

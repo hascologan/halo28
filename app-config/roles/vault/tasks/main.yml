@@ -1,0 +1,73 @@
+---
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Adding Hashicorp repo to dnf.conf
+  blockinfile:
+    path: /etc/dnf/dnf.conf
+    block: |
+      [hashicorp]
+      name=Hashicorp Stable - $basearch
+      baseurl=https://rpm.releases.hashicorp.com/RHEL/$releasever/$basearch/stable
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://rpm.releases.hashicorp.com/gpg
+
+      [hashicorp-test]
+      name=Hashicorp Test - $basearch
+      baseurl=https://rpm.releases.hashicorp.com/RHEL/$releasever/$basearch/test
+      enabled=0
+      gpgcheck=1
+      gpgkey=https://rpm.releases.hashicorp.com/gpg
+  become: yes
+
+- name: Install Vault
+  dnf:
+    name: vault
+    state: latest
+  become: yes
+
+- name: Change vault cert directory ownership
+  file:
+    path: /etc/pki/vault/
+    state: directory
+    owner: vault
+    group: vault
+    mode: "0755"
+  become: yes
+
+- name: Change vault cert file ownership
+  file:
+    path: /etc/pki/vault/
+    state: directory
+    recurse: true
+    owner: vault
+    group: vault
+  become: yes
+
+- name: Template the vault configuration file
+  template:
+    src: config.j2
+    dest: /etc/vault.d/vault.hcl
+    owner: vault
+    group: vault
+    mode: "0644"
+  become: yes
+
+- name: Enable vault systemd
+  systemd:
+    name: vault
+    state: started
+    enabled: yes
+  become: yes
+
+- include_tasks: vault-init.yml
+
+- include_tasks: secret-handler.yml
+  when: hostvars[groups["ipaserver"][0]]["user_list"] is defined
+
+- include_tasks: vault-ldap.yml
+- include_tasks: vault-policy.yml
+- include_tasks: vault-secret.yml

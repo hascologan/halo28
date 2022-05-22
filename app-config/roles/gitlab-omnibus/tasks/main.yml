@@ -1,0 +1,214 @@
+---
+- name: Install required dnf packages
+  dnf:
+    name:
+      - policycoreutils
+      - openssh-server
+      - perl
+      - postfix
+    state: latest
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+- name: Install required yum packages
+  yum:
+    name:
+      - policycoreutils
+      - openssh-server
+      - perl
+      - postfix
+    state: latest
+  become: yes
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "7") or
+    (ansible_facts['distribution'] == "Amazon" and
+    ansible_facts['distribution_major_version'] == "2")
+
+- name: Enable postfix service
+  systemd:
+    name: postfix
+    enabled: yes
+  become: yes
+
+- name: Start the postfix service
+  systemd:
+    name: postfix
+    state: started
+  become: yes
+
+- name: Check to see if GitLab is installed by dnf
+  dnf:
+    name: gitlab-ee
+    state: present
+  become: yes
+  ignore_errors: True
+  register: gitlab_status
+  failed_when: gitlab_status.rc == 128
+  changed_when: "'Failed to install' in gitlab_status.msg"
+  when:
+    (ansible_facts['distribution'] == "RedHat" and
+    ansible_facts['distribution_major_version'] == "8")
+
+# - name: Check to see if GitLab is installed by yum
+#   yum:
+#     name: gitlab-ee
+#     state: present
+#   become: yes
+#   ignore_errors: True
+#   register: gitlab_status
+#   failed_when: gitlab_status.rc == 128
+#   changed_when: "'No package matching' in gitlab_status.msg"
+#   when: (ansible_facts['distribution'] == "RedHat" and ansible_facts['distribution_major_version'] == "7") or
+#         (ansible_facts['distribution'] == "Amazon" and ansible_facts['distribution_major_version'] == "2")
+
+- name: Install GitLab
+  when: gitlab_status is changed
+  block:
+    - name: Download GitLab install script
+      get_url:
+        url: https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.rpm.sh
+        dest: "{{ ansible_facts.env.HOME }}"
+        mode: "0755"
+
+    - name: Run gitlab install script
+      command: bash script.rpm.sh
+      args:
+        chdir: "{{ ansible_facts.env.HOME }}"
+      become: yes
+
+    - name: Install GitLab via dnf
+      dnf:
+        name: gitlab-ee
+        state: present
+      become: yes
+      when:
+        (ansible_facts['distribution'] == "RedHat" and
+        ansible_facts['distribution_major_version'] == "8")
+
+    - name: Install GitLab via yum
+      yum:
+        name: gitlab-ee
+        state: present
+      become: yes
+      when:
+        (ansible_facts['distribution'] == "RedHat" and
+        ansible_facts['distribution_major_version'] == "7") or
+        (ansible_facts['distribution'] == "Amazon" and
+        ansible_facts['distribution_major_version'] == "2")
+
+    - name: remove gitlab install file
+      file:
+        state: absent
+        path: "{{ ansible_facts.env.HOME }}/script.rpm.sh"
+
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+  become: yes
+
+- name: Update facts
+  setup:
+
+- name: Create the TLS directory if it does not exist
+  ansible.builtin.file:
+    path: /etc/gitlab/ssl
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: Check to see if TLS cert is present
+  stat:
+    path: /etc/gitlab/ssl/{{ ansible_facts.fqdn }}.crt
+  register: cert
+
+- name: Create TLS self signed certs
+  command:
+    chdir: /etc/gitlab/ssl/
+    argv:
+      - openssl
+      - req
+      - -nodes
+      - -new
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -keyout
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.crt"
+      - -subj
+      - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: cert.stat.exists == false
+
+- name: Check to see if TLS CSR is present
+  stat:
+    path: /etc/gitlab/ssl/{{ ansible_facts.fqdn }}.csr
+  register: csr
+
+- name: Create TLS CSR
+  command:
+    chdir: /etc/gitlab/ssl/
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ ansible_facts.fqdn }}.key"
+      - -out
+      - "{{ ansible_facts.fqdn }}.csr"
+      - -subj
+      - "/C=US/ST=NY/L=New York/O=Software Factory/CN={{ ansible_facts.fqdn }}"
+  become: yes
+  when: csr.stat.exists == false
+
+- name: Configure gitlab.rb with domain and custom TLS certs
+  become: yes
+  lineinfile:
+    path: /etc/gitlab/gitlab.rb
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  with_items:
+    - {
+        regexp: "^#?\\s*external_url",
+        line: "external_url 'https://{{ ansible_facts.fqdn }}'",
+      }
+    - {
+        regexp: "^#?\\s*letsencrypt\\['enable'\\]",
+        line: "letsencrypt['enable'] = false",
+      }
+    - {
+        regexp: "^#?\\s*gitlab_rails\\['gitlab_default_can_create_group'\\]",
+        line: "gitlab_rails['gitlab_default_can_create_group'] = false",
+      }
+
+# - name: update gitlab.rb to backup to S3 bucket
+#   blockinfile:
+#     path: /etc/gitlab/gitlab.rb
+#     marker: "# {mark} BACKUP MANAGED BLOCK"
+#     insertafter: "# gitlab_rails\\['backup_multipart_chunk_size'\\]"
+#     block: |
+#       gitlab_rails['backup_upload_connection'] = {
+#         'provider' => 'AWS',
+#         'region' => '{{ region }}',
+#         'use_iam_profile' => true
+#       }
+#       gitlab_rails['backup_upload_remote_directory'] = '{{ backup_bucket_name }}'
+#   become: yes
+
+# - name: setup cron job for backups (UTC time)
+#   become: yes
+#   lineinfile:
+#     path: /etc/cron.d/gitlab-backup
+#     create: yes
+#     line: 0 2 * * * root /opt/gitlab/bin/gitlab-backup create CRON=1
+
+- name: Reconfigure gitlab
+  command:
+    argv:
+      - gitlab-ctl
+      - reconfigure
+  become: yes

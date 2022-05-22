@@ -1,0 +1,236 @@
+- name: Set the hostname
+  hostname:
+    name: "{{ ansible_host }}"
+
+###########################################################
+## Run Kinit                                              #
+###########################################################
+- name: Get Token
+  command: kinit admin
+  args:
+    stdin: "{{ admin_pwd }}"
+
+- name: Check Token
+  command: klist
+  register: result
+  failed_when: "'krbtgt' not in result.stdout"
+
+#########################################################
+## Establish Current State of IPA                       #
+#########################################################
+
+- name: List Hosts
+  command:
+    argv:
+      - ipa
+      - host-find
+  ignore_errors: True
+  register: host_list
+
+- name: List Groups
+  command:
+    argv:
+      - ipa
+      - group-find
+  ignore_errors: True
+  register: group_list
+
+- name: List HBAC Rules
+  command:
+    argv:
+      - ipa
+      - hbacrule-find
+  ignore_errors: True
+  register: rule_list
+
+#########################################################
+## Remove Default allow_all Rule                        #
+#########################################################
+
+- name: Delete Allow All Rule
+  command:
+    argv:
+      - ipa
+      - hbacrule-del
+      - allow_all
+  when: "'Rule name: allow_all' in rule_list.stdout"
+
+#########################################################
+## Create IdM Groups                                    #
+#########################################################
+
+- include_tasks: add_group.yml
+  when: "'Host name: ' ~ item.0.name in host_list.stdout"
+  loop: "{{ clients | subelements('groups') }}"
+
+- name: Create VPN Users Group
+  command:
+    argv:
+      - ipa
+      - group-add
+      - vpn-users
+  when: "'Group name: vpn-users' not in group_list.stdout"
+
+- name: Update Groups
+  command:
+    argv:
+      - ipa
+      - group-find
+  ignore_errors: True
+  register: group_list
+
+#########################################################
+## HBAC Rule for Bastion Access                         #
+#########################################################
+
+- include_tasks: hbac_access_rule.yml
+  when:
+    - "'Rule name: ' ~ client.name ~ '-access' not in rule_list.stdout"
+    - "client.name ~ '-users' in group_list.stdout"
+  loop: "{{ hbac_access_rule }}"
+  loop_control:
+    loop_var: client
+
+#########################################################
+## Global Configuration Settings                        #
+#########################################################
+
+- name: Get Current Global Configuration Settings
+  command:
+    argv:
+      - ipa
+      - config-show
+  ignore_errors: True
+  register: config_state
+
+- name: Enable 2FA in Global Configuration Settings
+  command:
+    argv:
+      - ipa
+      - config-mod
+      - --user-auth-type=otp
+  when: "'Default user authentication types: otp' not in config_state.stdout"
+
+#########################################################
+## Create IdM Service Accounts                          #
+#########################################################
+
+- name: Get Current User List
+  command:
+    argv:
+      - ipa
+      - user-find
+  ignore_errors: True
+  register: user_list
+
+- include_tasks: add_service_user.yml
+  when:
+    - "'User login: service-' ~ service.name not in user_list.stdout"
+    - "'Host name: ' ~ service.name in host_list.stdout or service.name ==
+      'ldap'"
+  loop: "{{ service_accounts }}"
+  loop_control:
+    loop_var: service
+
+- name: Update User List
+  command:
+    argv:
+      - ipa
+      - user-find
+  ignore_errors: True
+  register: user_list
+
+###########################################################
+## SUDO Rules and Commands                                #
+###########################################################
+
+- name: Get Current List of Sudo Commands
+  command:
+    argv:
+      - ipa
+      - sudocmd-find
+  ignore_errors: True
+  register: sudocmd_list
+
+- name: Create Podman Sudo Command
+  command:
+    argv:
+      - ipa
+      - sudocmd-add
+      - /bin/podman
+      - --desc=Run podman command
+  when: "'Sudo Command: /bin/podman' not in sudocmd_list.stdout"
+
+###########################################################
+## SUDO Rules                                             #
+###########################################################
+
+- name: Get Current List of Sudo Rules
+  command:
+    argv:
+      - ipa
+      - sudorule-find
+  ignore_errors: True
+  register: sudorule_list
+
+- block:
+    - name: Create Super Admin Sudo Rule
+      command:
+        argv:
+          - ipa
+          - sudorule-add
+          - super-admins
+          - --desc=Allow users to run at sudo level without password
+          - --cmdcat=all
+          - --hostcat=all
+
+    - name: Attach Option to Super Admin Sudo Rule
+      command:
+        argv:
+          - ipa
+          - sudorule-add-option
+          - super-admins
+          - --sudooption=!authenticate
+
+  when: "'Rule name: super-admins' not in sudorule_list.stdout"
+
+###########################################################
+
+- block:
+    - name: Create Podman Usage Sudo Rule
+      command:
+        argv:
+          - ipa
+          - sudorule-add
+          - podman-usage
+          - --desc=Allow users to run podman commands
+
+    - name: Attach Option to Podman Usage Sudo Rule
+      command:
+        argv:
+          - ipa
+          - sudorule-add-option
+          - podman-usage
+          - --sudooption=!authenticate
+
+    - name: Attach Command to Podman Usage Sudo Rule
+      command:
+        argv:
+          - ipa
+          - sudorule-add-allow-command
+          - podman-usage
+          - --sudocmds=/bin/podman
+  when: "'Rule name: podman-usage' not in sudorule_list.stdout"
+
+###########################################################
+## Destroy Kinit Token                                    #
+###########################################################
+
+- name: Destroy Token
+  command: kdestroy
+
+- name: Check Token
+  command: klist
+  register: result
+  failed_when: "'krbtgt' in result.stdout"
+  changed_when: result.rc != 1

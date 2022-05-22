@@ -1,0 +1,62 @@
+- name: Log into vault
+  command:
+    argv:
+      - vault
+      - login
+      - -address=https://{{ ansible_host }}:8200
+      - token={{ vault_token.root_token }}
+  register: login_info
+
+- name: Set the domain variable to be used in configurations
+  set_fact:
+    domain_list:
+      '{{ ["dc="] | product(ansible_facts.domain.split(".")) | map("join") |
+      list | join(",") }}'
+
+- name: Get list of existing auth methods
+  command:
+    argv:
+      - vault
+      - auth
+      - list
+      - -address=https://{{ ansible_host }}:8200
+  register: auth_list
+
+- block:
+    - name: Create LDAP auth method
+      command:
+        argv:
+          - vault
+          - auth
+          - enable
+          - -address=https://{{ ansible_host }}:8200
+          - ldap
+
+    - name: Get service-ldap password
+      command:
+        argv:
+          - vault
+          - kv
+          - get
+          - -address=https://{{ ansible_host }}:8200
+          - -field=password
+          - secrets/service-ldap
+      register: ldap_pass
+
+    - name: Modify LDAP auth configuration
+      command:
+        argv:
+          - vault
+          - write
+          - -address=https://{{ ansible_host }}:8200
+          - auth/ldap/config
+          - url=ldap://ipa.{{ ansible_facts.domain }}
+          - userdn=cn=users,cn=accounts,{{ domain_list }}
+          - userattr=uid
+          - groupdn=cn=groups,cn=accounts,{{ domain_list }}
+          - groupattr=cn
+          - binddn=uid=service-ldap,cn=users,cn=accounts,{{ domain_list }}
+          - bindpass={{ ldap_pass.stdout }}
+          - starttls=false
+
+  when: '"ldap" not in auth_list.stdout'

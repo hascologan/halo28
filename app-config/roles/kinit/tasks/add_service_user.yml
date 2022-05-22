@@ -1,0 +1,11 @@
+- name: Create {{ service.name }} Service User
+  command:
+    argv:
+      - ipa
+      - user-add
+      - service-{{ service.name }}
+      - --displayname={{ service.name }}
+      - --first=Service
+      - --last={{ service.name }}
+      - --password-expiration={{ password_expiration_date }}
+      - --user-auth-type=password
